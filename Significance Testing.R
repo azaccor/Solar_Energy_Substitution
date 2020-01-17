@@ -91,6 +91,26 @@ for(i in 1:length(cohorts)){
     imp_act_sums <- append(imp_act_sums, sum(df_i$import_kwh))
 }
 
+## This is used for significance testing, second for loop added to expand by a FE variable.
+# self_pred_sums <- c()
+# gross_pred_sums <- c()
+# imp_pred_sums <- c()
+# self_act_sums <- c()
+# gross_act_sums <- c()
+# imp_act_sums <- c()
+# for(i in 1:length(cohorts)){
+#   for(j in 1:7){
+#     df_i <- df %>% filter(optCohort == i, dow == j, gen_kwh>0)
+#     self_pred_sums <- append(self_pred_sums, sum(df_i$self_preds))
+#     gross_pred_sums <- append(gross_pred_sums, sum(df_i$gross_preds))
+#     imp_pred_sums <- append(imp_pred_sums, sum(df_i$imp_preds))
+#     
+#     self_act_sums <- append(self_act_sums, sum(df_i$selfcons_kwh))
+#     gross_act_sums <- append(gross_act_sums, sum(df_i$gross_kwh))
+#     imp_act_sums <- append(imp_act_sums, sum(df_i$import_kwh))
+#   }
+# }
+
 ## Basic histograms
 hist(self_act_sums)
 hist(self_pred_sums)
