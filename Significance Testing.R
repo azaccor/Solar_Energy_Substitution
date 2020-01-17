@@ -51,28 +51,6 @@ for(i in 1:length(cohorts)){
   assign(paste("pred_imp_", i, sep = ""), as.vector(as.matrix(predict(get(paste("Imp_", i, sep = "")), cohort_i))))
 }
 
-## Aggregating across all households to view Average Treatment Effect
-self_deltas <- c()
-gross_deltas <- c()
-imp_deltas <- c()
-for(i in 1:length(cohorts)){
-  actual_self = as.vector(as.matrix(df %>% filter(optCohort == i) %>% arrange(index) %>% select(selfcons_kwh)))
-  actual_gross = as.vector(as.matrix(df %>% filter(optCohort == i) %>% arrange(index) %>% select(gross_kwh)))
-  actual_imp = as.vector(as.matrix(df %>% filter(optCohort == i) %>% arrange(index) %>% select(import_kwh)))
-  
-  self_deltas <- append(self_deltas, get(paste("pred_self_", i, sep = ""))-actual_self)
-  gross_deltas <- append(gross_deltas, get(paste("pred_gross_", i, sep = ""))-actual_gross)
-  imp_deltas <- append(imp_deltas, get(paste("pred_imp_", i, sep = ""))-actual_imp)
-}
-
-summary(self_deltas)
-summary(gross_deltas)
-summary(imp_deltas)
-## All three distributions are approximately normal. 
-hist(self_deltas, xlim = c(-0.3,0.3))
-hist(gross_deltas, xlim = c(-1,1))
-hist(imp_deltas, xlim = c(-1,1))
-
 ## Just Predicted, not deltas.
 self_preds <- c()
 gross_preds <- c()
@@ -95,26 +73,7 @@ df <- cbind(df, self_preds)
 df <- cbind(df, gross_preds)
 df <- cbind(df, imp_preds)
 
-self_pred_means <- c()
-gross_pred_means <- c()
-imp_pred_means <- c()
-self_act_means <- c()
-gross_act_means <- c()
-imp_act_means <- c()
-for(i in 1:length(cohorts)){
-  df_i <- df %>% filter(optCohort == i, gen_kwh > 0)
-  self_pred_means <- append(self_pred_means, mean(df_i$self_preds))
-  gross_pred_means <- append(gross_pred_means, mean(df_i$gross_preds))
-  imp_pred_means <- append(imp_pred_means, mean(df_i$imp_preds))
-  
-  self_act_means <- append(self_act_means, mean(df_i$selfcons_kwh))
-  gross_act_means <- append(gross_act_means, mean(df_i$gross_kwh))
-  imp_act_means <- append(imp_act_means, mean(df_i$import_kwh))
-}
-
-hist(self_act_means)
-hist(self_pred_means)
-
+## This is used for significance testing, add second for loop to expand by a FE variable.
 self_pred_sums <- c()
 gross_pred_sums <- c()
 imp_pred_sums <- c()
@@ -132,9 +91,11 @@ for(i in 1:length(cohorts)){
     imp_act_sums <- append(imp_act_sums, sum(df_i$import_kwh))
 }
 
+## Basic histograms
 hist(self_act_sums)
 hist(self_pred_sums)
 
+## Overlapped density plots
 hh_selfs <- data.frame(self_pred_sums, self_act_sums) %>%
   gather("self_pred_sums", "self_act_sums", key = Type, value = kWh)
 hh_gross <- data.frame(gross_pred_sums, gross_act_sums) %>%
@@ -145,30 +106,42 @@ hh_imps <- data.frame(imp_pred_sums, imp_act_sums) %>%
 ggdensity(hh_selfs, x = "kWh",
           add = "mean", rug = TRUE,
           color = "Type", fill = "Type",
-          palette = c("#0073C2FF", "#FC4E07"))
+          palette = c("#FC4E07", "#0073C2FF")) +
+  ylab("Density") +
+  xlab("Self Consumption in kWh") +
+  ggtitle("Density Graph for Total Household Self Consumption")
+  
 ggdensity(hh_gross, x = "kWh",
           add = "mean", rug = TRUE,
           color = "Type", fill = "Type",
-          palette = c("#0073C2FF", "#FC4E07"))
+          palette = c("#FC4E07", "#0073C2FF")) +
+  ylab("Density") +
+  xlab("Gross Consumption in kWh") +
+  ggtitle("Density Graph for Total Household Gross Consumption")
+
 ggdensity(hh_imps, x = "kWh",
           add = "mean", rug = TRUE,
           color = "Type", fill = "Type",
-          palette = c("#0073C2FF", "#FC4E07"))
+          palette = c("#FC4E07", "#0073C2FF")) +
+  ylab("Density") +
+  xlab("Imports in kWh") +
+  ggtitle("Density Graph for Total Household Imports")
 
-
+## Back to good old fashioned histograms
 hist(self_pred_sums - self_act_sums, main = "HH Agg Self Cons ATEs", xlab = "Predicted - Actual")
 hist(gross_pred_sums - gross_act_sums, main = "HH Agg Gross Cons ATEs", xlab = "Predicted - Actual")
 hist(imp_pred_sums - imp_act_sums, main = "HH Agg Import ATEs", xlab = "Predicted - Actual")
 
-## Paired Sample T-Test on Actual vs Predicted:
+## Paired Sample T-Test on Actual vs Predicted on total by household:
 t.test(self_pred_sums, self_act_sums, alternative = "less", paired = TRUE, var.equal = FALSE, conf.level = 0.95)
 t.test(gross_pred_sums, gross_act_sums, alternative = "greater", paired = TRUE, var.equal = FALSE, conf.level = 0.95)
 t.test(imp_pred_sums, imp_act_sums, alternative = "greater", paired = TRUE, var.equal = FALSE, conf.level = 0.95)
 
+## Just to prove to ourselves what's going on here:
 mean(self_pred_sums)
 mean(self_act_sums)
 
-
+## What is the average test period for a cohort? About 1.25 years.
 date_ranges <- df %>%
   select(sid, day) %>%
   group_by(sid) %>%
@@ -176,37 +149,114 @@ date_ranges <- df %>%
 
 mean(date_ranges$date_rng)
 
+## Aggregate all results together by household and visualize similar to Burlig et al.
+hh_hour_level <- as.data.frame(df %>%
+  filter(gen_kwh>0) %>%
+  group_by(optCohort, hour) %>%
+  summarise(sps = sum(self_preds), gps = sum(gross_preds), ips = sum(imp_preds),
+            sas = sum(selfcons_kwh), gas = sum(gross_kwh), ias = sum(import_kwh)) %>%
+  group_by(hour) %>%
+  summarise(sps = mean(sps), gps = mean(gps), ips = mean(ips), sas = mean(sas), gas = mean(gas), ias = mean(ias)))
+
+hh_dow_level <- as.data.frame(df %>%
+  filter(gen_kwh>0) %>%
+  group_by(optCohort, dow) %>%
+  summarise(sps = sum(self_preds), gps = sum(gross_preds), ips = sum(imp_preds),
+            sas = sum(selfcons_kwh), gas = sum(gross_kwh), ias = sum(import_kwh)) %>%
+  group_by(dow) %>%
+  summarise(sps = mean(sps), gps = mean(gps), ips = mean(ips), sas = mean(sas), gas = mean(gas), ias = mean(ias)))
+
+hh_month_level <- as.data.frame(df %>%
+  filter(gen_kwh>0) %>%
+  group_by(optCohort, month) %>%
+  summarise(sps = sum(self_preds), gps = sum(gross_preds), ips = sum(imp_preds),
+            sas = sum(selfcons_kwh), gas = sum(gross_kwh), ias = sum(import_kwh)) %>%
+  group_by(month) %>%
+  summarise(sps = mean(sps), gps = mean(gps), ips = mean(ips), sas = mean(sas), gas = mean(gas), ias = mean(ias)))
+
+#hh_hour_level$type <- rep("hour", 24)
+#hh_dow_level$type <- rep("dow", 7)
+#hh_month_level$type <- rep("month", 12)
+#colnames(hh_hour_level) <- c("var", "sps", "gps", "ips", "sas", "gas", "ias", "type")
+#colnames(hh_dow_level) <- c("var", "sps", "gps", "ips", "sas", "gas", "ias", "type")
+#colnames(hh_month_level) <- c("var", "sps", "gps", "ips", "sas", "gas", "ias", "type")
+
+#hh_all_levels <- rbind(hh_hour_level, hh_dow_level)
+#hh_all_levels <- rbind(hh_all_levels, hh_month_level)
+
+## Self Cons Plots
+ggplot(hh_hour_level, aes(hour)) + 
+  geom_point(aes(y = sas, colour = "Actual Self Consumption")) + 
+  geom_point(aes(y = sps, colour = "Predicted Self Consumption")) +
+  xlab("Hour of Day") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Hour of Day") +
+  theme(legend.position="bottom")
+
+ggplot(hh_dow_level, aes(dow)) + 
+  geom_point(aes(y = sas, colour = "Actual Self Consumption")) + 
+  geom_point(aes(y = sps, colour = "Predicted Self Consumption")) +
+  xlab("Day of Week") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Day of Week") +
+  theme(legend.position="bottom")
+
+ggplot(hh_month_level, aes(month)) + 
+  geom_point(aes(y = sas, colour = "Actual Self Consumption")) + 
+  geom_point(aes(y = sps, colour = "Predicted Self Consumption")) +
+  xlab("Month") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Month") +
+  theme(legend.position="bottom")
+
+## Gross Cons Plots
+ggplot(hh_hour_level, aes(hour)) + 
+  geom_point(aes(y = gas, colour = "Actual Gross Consumption")) + 
+  geom_point(aes(y = gps, colour = "Predicted Gross Consumption")) +
+  xlab("Hour of Day") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Hour of Day") +
+  theme(legend.position="bottom")
+
+ggplot(hh_dow_level, aes(dow)) + 
+  geom_point(aes(y = gas, colour = "Actual Gross Consumption")) + 
+  geom_point(aes(y = gps, colour = "Predicted Gross Consumption")) +
+  xlab("Day of Week") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Day of Week") +
+  theme(legend.position="bottom")
+
+ggplot(hh_month_level, aes(month)) + 
+  geom_point(aes(y = gas, colour = "Actual Gross Consumption")) + 
+  geom_point(aes(y = gps, colour = "Predicted Gross Consumption")) +
+  xlab("Month") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Month") +
+  theme(legend.position="bottom")
+
+## Imports Plots
+ggplot(hh_hour_level, aes(hour)) + 
+  geom_point(aes(y = ias, colour = "Actual Imports")) + 
+  geom_point(aes(y = ips, colour = "Predicted Imports")) +
+  xlab("Hour of Day") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Hour of Day") +
+  theme(legend.position="bottom")
+
+ggplot(hh_dow_level, aes(dow)) + 
+  geom_point(aes(y = ias, colour = "Actual Imports")) + 
+  geom_point(aes(y = ips, colour = "Predicted Imports")) +
+  xlab("Day of Week") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Day of Week") +
+  theme(legend.position="bottom")
+
+ggplot(hh_month_level, aes(month)) + 
+  geom_point(aes(y = ias, colour = "Actual Imports")) + 
+  geom_point(aes(y = ips, colour = "Predicted Imports")) +
+  xlab("Month") +
+  ylab("Total kWh (Over Observation Period)") +
+  ggtitle("Average Treatment Effect by Month") +
+  theme(legend.position="bottom")
 
 
-
-## Do not run these lines, meaningless conclusions for now:
-## Percentage ATE
-self_deltas_pct <- c()
-gross_deltas_pct <- c()
-imp_deltas_pct <- c()
-for(i in 1:length(cohorts)){
-  actual_self = as.vector(as.matrix(df %>% filter(optCohort == i) %>% arrange(index) %>% select(selfcons_kwh)))
-  actual_gross = as.vector(as.matrix(df %>% filter(optCohort == i) %>% arrange(index) %>% select(gross_kwh)))
-  actual_imp = as.vector(as.matrix(df %>% filter(optCohort == i) %>%  arrange(index) %>%select(import_kwh)))
-  
-  self_deltas_pct <- append(self_deltas_pct, 100*(actual_self/get(paste("pred_self_", i, sep = ""))-1))
-  gross_deltas_pct <- append(gross_deltas_pct, 100*(actual_gross/get(paste("pred_gross_", i, sep = ""))-1))
-  imp_deltas_pct <- append(imp_deltas_pct, 100*(actual_imp/get(paste("pred_imp_", i, sep = ""))-1))
-  
-  print(i)
-}
-
-summary(self_deltas_pct)
-summary(gross_deltas_pct)
-summary(imp_deltas_pct)
-
-hist(self_deltas_pct[self_deltas_pct > -20 & self_deltas_pct < 20], breaks = 12, 
-     xlab = "% Change", main = "Estimated ATEs on Self Consumption")
-
-hist(gross_deltas_pct[gross_deltas_pct < 140], breaks = 8, 
-     xlab = "% Change", main = "Estimated ATEs on Gross Consumption")
-
-hist(imp_deltas_pct[imp_deltas_pct > -100 & imp_deltas_pct < 200], breaks = 14,
-     xlab = "% Change", main = "Estimated ATEs on Imported kWh")
-
-hist(imp_deltas_pct)
